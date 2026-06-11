@@ -153,7 +153,17 @@ class SquareReceiptPrinter:
         phone = data.get('phone', '')
         left_header_lines = address_lines + ([phone] if phone else [])
 
+
         txn_time = data.get('transaction_time', datetime.now())
+        if isinstance(txn_time, str):
+            try:
+                txn_time = datetime.strptime(txn_time, "%m/%d/%Y %I:%M %p")
+            except ValueError:
+                try:
+                    txn_time = datetime.strptime(txn_time, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    txn_time = datetime.now()
+
         date_str = f"{txn_time.month}/{txn_time.day}/{txn_time.year}"
         time_str = f"{txn_time.strftime('%I:%M %p').lstrip('0')}"
         right_header_lines = [date_str, time_str]
@@ -237,7 +247,7 @@ class SquareReceiptPrinter:
                    (self.canvas_width - self.margin, self.current_y - self.block_spacing//2)], fill=0, width=1)
 
         # --- 6. Policy ---
-        policy = "Return Policy: No cash refunds. Store credit only."
+        policy = data.get("footer_text", "Return Policy: No cash refunds. Store credit only.")
         policy_lines = self._wrap_text(draw, policy, self.font_reg, self.content_width)
         for line in policy_lines:
             self._draw_left(draw, line, self.font_reg)
@@ -263,3 +273,29 @@ class SquareReceiptPrinter:
                 hDC.DeleteDC()
             except Exception as e:
                 print(f"[WARN] Print failed: {e}")
+
+
+if __name__ == "__main__":
+    data = {
+        "store_name": "Retreat 21",
+        "address": "11433 Industrial Pkwy, Ste 110\nMARYSVILLE, OH 43040",
+        "phone": "(804) 631-3874",
+        "transaction_time": "6/12/2026 4:23 AM",
+        "tax_rate": "7.24%",
+        "items": [
+            {"name": "Custom Amount", "price": 55.55, "qty": 1, "taxable": True},
+            {"name": "Hershey S Chocolate Pudding Cups Snack ct Cups", "price": 3.49, "qty": 1, "taxable": True},
+            {"name": "Fetzer Gewurztraminer 750ml", "price": 8.99, "qty": 1, "taxable": True},
+            {"name": "Eppa SupraFruta Organic Red Sangria 750ml", "price": 12.99, "qty": 2, "taxable": True},
+            {"name": "Kono Marlborough Sauvignon Blanc 750ml", "price": 15.99, "qty": 1, "taxable": True},
+            {"name": "Nabisco Ritz Peanut Butter 1x1 oz", "price": 3.29, "qty": 1, "taxable": True}
+        ],
+        "footer_text": "Return Policy: No cash refunds. Store credit only.",
+        "auto_generate_logo": True,
+        "logo_path": "logo.png"
+    }
+
+    printer = SquareReceiptPrinter(reg='receipt_generator/fonts/sqmarket-regular.ttf', med='receipt_generator/fonts/sqmarket-medium.ttf', bold='receipt_generator/fonts/sqmarket-bold.ttf')
+    img = printer.build_image(data)
+    img.save("test_output.png")
+    print("Saved test_output.png")
