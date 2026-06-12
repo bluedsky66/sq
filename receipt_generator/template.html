@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta content="width=device-width, initial-scale=1" name="viewport">
+<meta content="noindex,nofollow" name="robots">
+<title>Receipt</title>
+<link rel="stylesheet" href="https://d26s32y0mgz2yl.cloudfront.net/receipts/assets/application-d5e58bf4f1742c820fff780619a86ab3373b6b4f0f49eb8c5d8b61e7f5750f43.css">
+<link rel="stylesheet" href="https://d26s32y0mgz2yl.cloudfront.net/receipts/assets/printable-a74e257f710d547d12a8c7c99b9b654802c25a9b6840844a160050d12cb064d1.css" media="all">
+</head>
+<body>
+<div id="outer-wrapper">
+<div id="inner-wrapper">
+<!-- LOGO_SECTION -->
+<div class="section">
+<table class="printable-table table-payment-info">
+<tbody>
+<tr><td><p class="text-primary">{store_name}</p></td></tr>
+<tr>
+<td>
+{address_html}
+<p class="text-tertiary">{phone}</p>
+</td>
+<td>
+<p class="text-tertiary">{date_str}</p>
+<p class="text-tertiary">{time_str}</p>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="section">
+<table class="printable-table table-payment-info">
+<tbody>
+{items_html}
+<tr><td width="100%" height="11" colspan="3"> </td></tr>
+<tr><td colspan="3" style="border-top: 1px dashed #e0e1e2;" height="1"><img width="1" height="1" border="0" alt="" style="line-height: 0; font-size: 0;" src="https://d26s32y0mgz2yl.cloudfront.net/receipts/assets/spacer-17af9e65317bbbfbbd0bcdc729f14faadf37cd08cf30cc0fe0b72443e78cbffb.png"></td></tr>
+<tr><td width="100%" height="11" colspan="3"> </td></tr>
+<tr><td align="left" class="half-col-left"><div class="p">Purchase Subtotal</div></td><td align="right" class="half-col-right"><div class="p currency">${subtotal}</div></td></tr>
+<tr><td align="left" class="half-col-left"><div class="p">Sales Tax ({tax_rate})</div></td><td align="right" class="half-col-right"><div class="p currency">${tax_amount}</div></td></tr>
+<tr class="tr-payment-total"><td align="left" class="half-col-left"><div class="p purchase-total">Total</div></td><td align="right" class="half-col-right"><div class="p currency purchase-total">${total}</div></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="section">
+<table class="printable-table">
+<tbody>
+<tr><td><p class="text-tertiary">Receipt {receipt_id}</p></td><td><p class="text-tertiary">{payment_method}</p></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="section">
+<table class="printable-table">
+<tbody>
+<tr><td><p class="text-tertiary">{footer_text}</p></td></tr>
+</tbody>
+</table>
+</div>
+
+</div>
+</div>
+</body>
+</html>

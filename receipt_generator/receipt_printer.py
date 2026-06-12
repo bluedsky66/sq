@@ -1,151 +1,56 @@
 import os
-import platform
 import random
 import string
-import math
+import base64
+from io import BytesIO
 from datetime import datetime
-from PIL import Image, ImageDraw, ImageFont, features
+from PIL import Image, ImageDraw, ImageFont
 
 class SquareReceiptPrinter:
-    def __init__(self, reg='fonts/sqmarket-regular.ttf', med='fonts/sqmarket-medium.ttf', bold='fonts/sqmarket-bold.ttf'):
-        # Target width is 576. Original web wrapper is 375. Scale = 576 / 375 = 1.536
-        self.scale = 576 / 375.0
-        self.canvas_width = 576
+    def __init__(self, **kwargs):
+        pass
 
-        # #inner-wrapper { margin: 32px 16px 32px 16px }
-        self.margin_x = int(16 * self.scale)
-        self.content_width = self.canvas_width - self.margin_x * 2
+    def _generate_simple_logo(self, store_name):
+        W, H = 150, 150
+        img = Image.new('RGB', (W, H), color=(255, 255, 255))
+        d = ImageDraw.Draw(img)
+        d.rectangle([10, 10, W-10, H-10], outline=(0,0,0), width=4)
 
-        self.reg_font_path = reg
-        self.med_font_path = med
-        self.bold_font_path = bold
-        self.has_raqm = features.check('raqm')
+        words = store_name.split()
+        acr = ''.join([w[0].upper() for w in words if w.isalpha()][:3])
+        if not acr: acr = "S"
 
-        # Colors mapped from CSS
-        self.color_primary = (0, 0, 0)       # #000000
-        self.color_tertiary = (102, 113, 122) # #66717A
-
+        # Load a default font for fallback logo since we deleted the SQMarket fonts
         try:
-            # Fonts mapping from CSS
-            # .text-tertiary: 14px 400. 14 * 1.536 = 21.504
-            self.font_14_reg = ImageFont.truetype(reg, int(14 * self.scale))
-            # .item-name: 14px 500
-            self.font_14_med = ImageFont.truetype(med, int(14 * self.scale))
-            # .text-primary: 16px 500
-            self.font_16_med = ImageFont.truetype(med, int(16 * self.scale))
-        except Exception:
-            raise RuntimeError("SQ Market fonts missing.")
+            font = ImageFont.truetype("arial.ttf", 60)
+        except:
+            font = ImageFont.load_default(size=60) if hasattr(ImageFont, 'load_default') else ImageFont.load_default()
 
-    def _draw_text_exact(self, draw, x, y, text, font, align="left", fill=(0,0,0)):
-        kwargs = {'features': ['+tnum']} if self.has_raqm else {}
-        if align == "right":
-            length = draw.textlength(text, font=font, **kwargs)
-            x -= length
-        elif align == "center":
-            length = draw.textlength(text, font=font, **kwargs)
-            x -= length / 2
-        draw.text((x, y), text, fill=fill, font=font, **kwargs)
+        bbox = d.textbbox((0, 0), acr, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        d.text(((W - tw) // 2, (H - th) // 2 - 10), acr, fill=(0,0,0), font=font)
+        return img
 
-    def _wrap_text(self, draw, text, font, max_width):
-        kwargs = {'features': ['+tnum']} if self.has_raqm else {}
-        words = text.split()
-        lines = []
-        for word in words:
-            if draw.textlength(word, font=font, **kwargs) > max_width:
-                current = ""
-                for ch in word:
-                    if draw.textlength(current + ch, font=font, **kwargs) <= max_width:
-                        current += ch
-                    else:
-                        if current: lines.append(current)
-                        current = ch
-                if current: lines.append(current)
-            else:
-                if not lines:
-                    lines.append(word)
-                else:
-                    test = lines[-1] + " " + word
-                    if draw.textlength(test, font=font, **kwargs) <= max_width:
-                        lines[-1] = test
-                    else:
-                        lines.append(word)
-        return lines
+    def _img_to_b64(self, img):
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    def _draw_dashed_line(self, draw, img):
-        # Image height is 1px, we place it exactly as in HTML.
-        # HTML: padding-bottom: 24px, margin-bottom: 24px for sections.
-        # Wait, the dotted line is <td colspan="3" style="border-top: 1px dashed #e0e1e2;" height="1">
-        # with spacer.png
-        spacer_path = os.path.join(os.path.dirname(__file__), 'spacer.png')
-        try:
-            spacer = Image.open(spacer_path).convert('RGBA')
-            sw, sh = spacer.size
-            if sw == 0 or sh == 0: raise ValueError
-            # Tile the spacer across the row
-            x = self.margin_x
-            while x < self.canvas_width - self.margin_x:
-                crop_w = min(sw, self.canvas_width - self.margin_x - x)
-                img.paste(spacer.crop((0, 0, crop_w, sh)), (x, int(self.current_y)), spacer.crop((0, 0, crop_w, sh)))
-                x += crop_w
-        except Exception:
-            # Fallback
-            draw.line([(self.margin_x, self.current_y), (self.canvas_width - self.margin_x, self.current_y)], fill=(224,225,226), width=1)
-        self.current_y += 1
+    def _generate_html(self, data):
+        template_path = os.path.join(os.path.dirname(__file__), 'template.html')
+        with open(template_path, 'r', encoding='utf-8') as f:
+            html = f.read()
 
-    def build_image(self, data):
-        # RGB to preserve gray anti-aliased text perfectly as seen on web.
-        img = Image.new('RGB', (self.canvas_width, 4000), color=(255,255,255))
-        draw = ImageDraw.Draw(img)
+        store_name = data.get('store_name', '')
 
-        # Start offset: #inner-wrapper margin-top: 32px
-        self.current_y = int(32 * self.scale)
-
-        # 1. Logo
-        logo_path = data.get('logo_path')
-        if logo_path and os.path.exists(logo_path):
-            try:
-                logo_img = Image.open(logo_path).convert('RGBA')
-                # 75x75 in CSS
-                logo_size = int(75 * self.scale)
-                logo_resized = logo_img.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
-
-                # Image paste with alpha blending if needed, here we use a white background
-                bg = Image.new('RGBA', logo_resized.size, (255,255,255,255))
-                bg.paste(logo_resized, (0, 0), logo_resized)
-
-                paste_x = (self.canvas_width - logo_size) // 2
-                img.paste(bg.convert('RGB'), (paste_x, int(self.current_y)))
-                # CSS: margin: 0 auto 32px auto
-                self.current_y += logo_size + int(32 * self.scale)
-            except: pass
-
-        # Line height in CSS is 24px for all these blocks.
-        lh_14 = int(24 * self.scale)
-        lh_16 = int(24 * self.scale)
-
-        # 2. Header (Store Info & Date)
-        # Store name: .text-primary (16px, 500, #000)
-        self._draw_text_exact(draw, self.margin_x, self.current_y, data['store_name'], self.font_16_med, fill=self.color_primary)
-        self.current_y += lh_16
-
-        # Left and Right Columns
-        start_cols_y = self.current_y
-
-        # Left: Address & Phone (.text-tertiary 14px, #66717A)
         address_lines = data.get('address', '').split('\n')
+        address_html = ""
         for line in address_lines:
-            self._draw_text_exact(draw, self.margin_x, self.current_y, line, self.font_14_reg, fill=self.color_tertiary)
-            self.current_y += lh_14
+            if line.strip():
+                address_html += f'<div class="p receipt-address" x-apple-data-detectors="false">{line.strip()}</div>\n'
 
         phone = data.get('phone', '')
-        if phone:
-            self._draw_text_exact(draw, self.margin_x, self.current_y, phone, self.font_14_reg, fill=self.color_tertiary)
-            self.current_y += lh_14
 
-        left_end_y = self.current_y
-
-        # Right: Date and Time (.text-tertiary 14px, #66717A)
-        self.current_y = start_cols_y
         txn_time = data.get('transaction_time', datetime.now())
         if isinstance(txn_time, str):
             try:
@@ -159,140 +64,121 @@ class SquareReceiptPrinter:
         date_str = f"{txn_time.month}/{txn_time.day}/{txn_time.year}"
         time_str = f"{txn_time.strftime('%I:%M %p').lstrip('0')}"
 
-        self._draw_text_exact(draw, self.canvas_width - self.margin_x, self.current_y, date_str, self.font_14_reg, align="right", fill=self.color_tertiary)
-        self.current_y += lh_14
-        self._draw_text_exact(draw, self.canvas_width - self.margin_x, self.current_y, time_str, self.font_14_reg, align="right", fill=self.color_tertiary)
-        self.current_y += lh_14
+        # Logo Section
+        logo_section = ""
+        logo_path = data.get('logo_path')
+        logo_img = None
 
-        right_end_y = self.current_y
+        if logo_path and os.path.exists(logo_path):
+            try:
+                logo_img = Image.open(logo_path).convert('RGB')
+            except Exception:
+                pass
 
-        # Max y defines end of section
-        self.current_y = max(left_end_y, right_end_y)
+        if not logo_img and data.get('auto_generate_logo', True):
+            logo_img = self._generate_simple_logo(store_name)
 
-        # Section separator: padding-bottom 24px, border-bottom 1px solid #000, margin-bottom 24px
-        self.current_y += int(24 * self.scale) - lh_14 # compensate for last line height
-        draw.line([(self.margin_x, self.current_y), (self.canvas_width - self.margin_x, self.current_y)], fill=self.color_primary, width=1)
-        self.current_y += int(24 * self.scale)
+        if logo_img:
+            # 75x75 in CSS mapped to our width
+            logo_img = logo_img.resize((150, 150), Image.Resampling.LANCZOS)
+            b64 = self._img_to_b64(logo_img)
+            logo_section = f'<div><img height="75" width="75" class="printable-image" alt="Merchant logo" src="data:image/png;base64,{b64}"></div>'
 
-        # 3. Items
-        # Right column flex flex: 0 0 100px.
-        right_col_w = int(100 * self.scale)
-        item_text_width = self.content_width - right_col_w
+        # Items
+        items_html = ""
+        subtotal = 0.0
+        for item in data.get('items', []):
+            name = item.get('name', '')
+            price = item.get('price', 0.0)
+            subtotal += price
+            qty_str = item.get('qty_str')
 
-        for idx, item in enumerate(data['items']):
-            if idx > 0:
-                self.current_y += int(8 * self.scale) # .item-row + .item-row margin-top 8px
+            items_html += f'<tr class="item-row"><td align="left" class="half-col-left payment-info-item" valign="top"><h2 class="p item-name">{name}</h2></td><td align="right" class="half-col-right" valign="top"><div class="p currency">${price:.2f}</div></td></tr>\n'
+            if qty_str:
+                items_html += f'<tr><td align="left" class="half-col-left payment-info-item"><div align="left" class="item-modifier-name"><div class="p item-description item-quantity">{qty_str}</div></div></td></tr>\n'
 
-            display_name = item['name']
-            price_str = f"${item['price']:.2f}"
+        # Taxes & Totals
+        tax_rate = data.get('tax_rate', '0%')
+        tax_amount = data.get('tax_amount', 0.0)
+        total = subtotal + tax_amount
 
-            # Both name and price use .item-name / .currency: 14px, 500, #000
-            name_lines = self._wrap_text(draw, display_name, self.font_14_med, item_text_width)
-
-            # Draw first line with price
-            self._draw_text_exact(draw, self.margin_x, self.current_y, name_lines[0], self.font_14_med, fill=self.color_primary)
-            self._draw_text_exact(draw, self.canvas_width - self.margin_x, self.current_y, price_str, self.font_14_med, align="right", fill=self.color_primary)
-            self.current_y += lh_14
-
-            # Draw remaining lines
-            for line in name_lines[1:]:
-                self._draw_text_exact(draw, self.margin_x, self.current_y, line, self.font_14_med, fill=self.color_primary)
-                self.current_y += lh_14
-
-        # Dotted Spacer: height 11px padding above/below.
-        self.current_y += int(11 * self.scale)
-        self._draw_dashed_line(draw, img)
-        self.current_y += int(11 * self.scale)
-
-        # 4. Totals
-        # .p -> #66717A 14px 400
-        full_subtotal = sum(i['price'] for i in data['items']) # Assuming data matches web exactly, quantity is already baked into item rows or price in user's prompt testing format.
-        # But wait, to match the exact URL, the subtotal is sum of prices.
-
-        tax_rate_str = data.get('tax_rate', '0%')
-        tax_rate = float(tax_rate_str.strip('%')) / 100.0 if '%' in tax_rate_str else float(tax_rate_str)
-        tax_amount = data.get('tax_amount', round(full_subtotal * tax_rate, 2))
-        total = full_subtotal + tax_amount
-
-        # Purchase Subtotal (Grey)
-        self._draw_text_exact(draw, self.margin_x, self.current_y, "Purchase Subtotal", self.font_14_reg, fill=self.color_tertiary)
-        self._draw_text_exact(draw, self.canvas_width - self.margin_x, self.current_y, f"${full_subtotal:.2f}", self.font_14_reg, align="right", fill=self.color_tertiary)
-        self.current_y += lh_14
-
-        # Sales Tax (Grey)
-        self._draw_text_exact(draw, self.margin_x, self.current_y, f"Sales Tax ({tax_rate_str})", self.font_14_reg, fill=self.color_tertiary)
-        self._draw_text_exact(draw, self.canvas_width - self.margin_x, self.current_y, f"${tax_amount:.2f}", self.font_14_reg, align="right", fill=self.color_tertiary)
-        self.current_y += lh_14
-
-        # Total (Black, 16px 500)
-        self.current_y += int(12 * self.scale) # margin-top: 12px
-        self._draw_text_exact(draw, self.margin_x, self.current_y, "Total", self.font_16_med, fill=self.color_primary)
-        self._draw_text_exact(draw, self.canvas_width - self.margin_x, self.current_y, f"${total:.2f}", self.font_16_med, align="right", fill=self.color_primary)
-        self.current_y += lh_16
-
-        # Section separator
-        self.current_y += int(24 * self.scale) - lh_16
-        draw.line([(self.margin_x, self.current_y), (self.canvas_width - self.margin_x, self.current_y)], fill=self.color_primary, width=1)
-        self.current_y += int(24 * self.scale)
-
-        # 5. Receipt ID and Payment Type
-        # Random 4 char
         receipt_id = ''.join(random.choices(string.ascii_letters, k=4))
         payment_method = random.choice(["Cash", "Credit Card"])
+        footer_text = data.get("footer_text", "Return Policy: No cash refunds. Store credit only.")
 
-        # .text-tertiary 14px 400
-        self._draw_text_exact(draw, self.margin_x, self.current_y, f"Receipt {receipt_id}", self.font_14_reg, fill=self.color_tertiary)
-        self._draw_text_exact(draw, self.canvas_width - self.margin_x, self.current_y, payment_method, self.font_14_reg, align="right", fill=self.color_tertiary)
-        self.current_y += lh_14
+        html = html.replace('{store_name}', store_name)
+        html = html.replace('{address_html}', address_html)
+        html = html.replace('{phone}', phone)
+        html = html.replace('{date_str}', date_str)
+        html = html.replace('{time_str}', time_str)
+        html = html.replace('{items_html}', items_html)
+        html = html.replace('{subtotal}', f"{subtotal:.2f}")
+        html = html.replace('{tax_rate}', tax_rate)
+        html = html.replace('{tax_amount}', f"{tax_amount:.2f}")
+        html = html.replace('{total}', f"{total:.2f}")
+        html = html.replace('{receipt_id}', receipt_id)
+        html = html.replace('{payment_method}', payment_method)
+        html = html.replace('{footer_text}', footer_text)
+        html = html.replace('<!-- LOGO_SECTION -->', logo_section)
 
-        # Section separator
-        self.current_y += int(24 * self.scale) - lh_14
-        draw.line([(self.margin_x, self.current_y), (self.canvas_width - self.margin_x, self.current_y)], fill=self.color_primary, width=1)
-        self.current_y += int(24 * self.scale)
+        return html
 
-        # 6. Policy
-        policy = data.get("footer_text", "Return Policy: No cash refunds. Store credit only.")
-        policy_lines = self._wrap_text(draw, policy, self.font_14_reg, self.content_width)
-        for line in policy_lines:
-            self._draw_text_exact(draw, self.margin_x, self.current_y, line, self.font_14_reg, fill=self.color_tertiary)
-            self.current_y += lh_14
+    def build_image(self, data):
+        html_content = self._generate_html(data)
 
-        # Final bottom wrapper margin
-        self.current_y += int(32 * self.scale)
+        from playwright.sync_api import sync_playwright
+        import tempfile
 
-        cropped_img = img.crop((0, 0, self.canvas_width, int(self.current_y)))
-        return cropped_img
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            # The CSS #outer-wrapper is 375px wide.
+            # Device scale factor maps it exactly to 576 pixels wide output image (375 * 1.536 = 576)
+            page = browser.new_page(
+                viewport={'width': 375, 'height': 2000},
+                device_scale_factor=1.536
+            )
+            page.set_content(html_content, wait_until="networkidle")
+
+            # Extract the actual height of the #inner-wrapper to crop properly without borders
+            wrapper = page.locator('#inner-wrapper')
+            box = wrapper.bounding_box()
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+                temp_path = tf.name
+
+            page.screenshot(path=temp_path, clip={'x': 0, 'y': 0, 'width': 375, 'height': box['y'] + box['height'] + 32})
+            browser.close()
+
+        # The user's goal is pixel-perfect alignment *but* mapped for an 80mm printer.
+        # Returning a pristine 8-bit Grayscale preserves the visual "greys" that the HTML specified,
+        # avoiding the aggressive, destructive 1-bit thresholding previously done.
+        # This will dither nicely or print smoothly on modern thermal drivers.
+        img = Image.open(temp_path).convert('L')
+        os.unlink(temp_path)
+        return img
 
 
 if __name__ == "__main__":
-    # Test data identical to Square web layout
     data = {
         "store_name": "Retreat 21",
         "address": "11433 Industrial Pkwy, Ste 110\nMARYSVILLE, OH 43040",
         "phone": "(804) 631-3874",
-        "transaction_time": "6/12/2026 4:23 AM",
+        "transaction_time": "6/12/2026 4:07 AM",
         "tax_rate": "7.24%",
-        "tax_amount": 6.77,
+        "tax_amount": 2.89,
         "items": [
-            {"name": "Custom Amount", "price": 55.55},
             {"name": "Hershey S Chocolate Pudding Cups Snack ct Cups", "price": 3.49},
-            {"name": "Fetzer Gewurztraminer 750ml", "price": 8.99},
-            {"name": "Eppa SupraFruta Organic Red Sangria 750ml", "price": 12.99},
-            {"name": "Kono Marlborough Sauvignon Blanc 750ml", "price": 15.99},
-            {"name": "Nabisco Ritz Peanut Butter 1x1 oz", "price": 3.29}
+            {"name": "Suntory -196 Peach Vodka Seltzer 4-Pack 355ml × 2", "price": 19.98, "qty_str": "($9.99 ea.)"},
+            {"name": "Suntory -196 Grapefruit Vodka Seltzer 4-Pack 355ml", "price": 9.99},
+            {"name": "Nabisco Ritz Peanut Butter 1x1 oz", "price": 3.29},
+            {"name": "Suntory -196 Grapefruit Vodka Seltzer 4-Pack 355ml", "price": 9.99}
         ],
         "footer_text": "Return Policy: No cash refunds. Store credit only.",
         "auto_generate_logo": True,
         "logo_path": "logo.png"
     }
 
-    # Running from receipt_generator/ directly
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    printer = SquareReceiptPrinter(
-        reg='fonts/sqmarket-regular.ttf',
-        med='fonts/sqmarket-medium.ttf',
-        bold='fonts/sqmarket-bold.ttf'
-    )
+    printer = SquareReceiptPrinter()
     img = printer.build_image(data)
-    img.save("../test_output2.png")
-    print("Saved test_output2.png")
+    img.save("test_output_playwright.png")
+    print("Saved test_output_playwright.png")
